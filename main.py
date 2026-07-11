@@ -123,9 +123,8 @@ async def answer_image(request: Request):
 
         out = parse_json(content)
         ans = normalize_answer(out.get("answer", ""))
-    except Exception as e:
-        # TEMP DEBUG MODE: return the real error instead of hiding it.
-        # Remove this except block's debug fields once things work.
-        return {"answer": "", "debug_error": f"{type(e).__name__}: {str(e)[:300]}"}
+    except Exception:
+        # Never let the endpoint crash / hang — always return valid JSON.
+        ans = ""
 
     return {"answer": str(ans)}
