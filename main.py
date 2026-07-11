@@ -21,6 +21,36 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Small in-memory cache: if the grader (or you, while testing) sends the same
+# input twice, we don't pay for/re-run the model call a second time.
+_CACHE = {}
+
+
+async def chat(messages, model=None, max_tokens=800, force_json=True):
+    """Call AIPipe's chat/completions endpoint with a plain text prompt
+    (no image) and return the raw text content of the model's reply."""
+    key = json.dumps({"m": model, "msgs": messages}, sort_keys=True, default=str)
+    if key in _CACHE:
+        return _CACHE[key]
+
+    body = {
+        "model": model or config.TEXT_MODEL,
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
+    if force_json:
+        body["response_format"] = {"type": "json_object"}
+
+    async with httpx.AsyncClient(timeout=90) as client:
+        r = await client.post(f"{config.AIPIPE_BASE}/chat/completions",
+                               headers=HEADERS, json=body)
+        r.raise_for_status()
+        out = r.json()["choices"][0]["message"]["content"]
+
+    _CACHE[key] = out
+    return out
+
 
 def parse_json(s: str) -> dict:
     """The model sometimes wraps JSON in ```json ... ``` fences — strip those,
@@ -128,3 +158,29 @@ async def answer_image(request: Request):
         ans = ""
 
     return {"answer": str(ans)}
+
+
+# ================= Q3: /extract (invoice text -> fixed fields) =================
+@app.post("/extract")
+async def extract(request: Request):
+    body = await request.json()
+    text = body.get("invoice_text", "")
+
+    prompt = (
+        "Extract these fields from the invoice text and return JSON with "
+        "EXACTLY these keys: invoice_no, date, vendor, amount, tax, currency.\n"
+        "- date: ISO YYYY-MM-DD\n"
+        "- amount: the SUBTOTAL before tax, as a plain number (no separators)\n"
+        "- tax: the tax amount only, as a plain number\n"
+        "- currency: ISO code (INR, USD, EUR...)\n"
+        "- use null if a field is not present.\n\n"
+        f"TEXT:\n{text}"
+    )
+
+    try:
+        out = parse_json(await chat([{"role": "user", "content": prompt}]))
+    except Exception:
+        out = {}
+
+    keys = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
+    return {k: out.get(k) for k in keys}
