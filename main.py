@@ -179,8 +179,12 @@ async def extract(request: Request):
 
     try:
         out = parse_json(await chat([{"role": "user", "content": prompt}]))
-    except Exception:
-        out = {}
+    except Exception as e:
+        # TEMP DEBUG: show the real error. Remove this except block once fixed.
+        keys = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
+        result = {k: None for k in keys}
+        result["debug_error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        return result
 
     keys = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
     return {k: out.get(k) for k in keys}
